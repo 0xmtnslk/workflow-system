@@ -1,0 +1,185 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+  WORKER
+}
+
+enum TemplateStatus {
+  ACTIVE
+  PASSIVE
+  ARCHIVED
+}
+
+enum InstanceStatus {
+  RUNNING
+  COMPLETED
+  ARCHIVED
+}
+
+enum StepStatus {
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TaskType {
+  CHECKBOX
+  YES_NO
+  TEXT
+  FILE_UPLOAD
+}
+
+enum NotificationType {
+  IN_APP
+  EMAIL
+}
+
+model User {
+  id             String      @id @default(uuid())
+  name           String
+  email          String      @unique
+  passwordHash   String
+  role           Role        @default(WORKER)
+  department     Department? @relation(fields: [departmentId], references: [id])
+  departmentId   String?
+  adUsername     String?
+  mustChangePassword Boolean @default(false)
+  stepInstances  StepInstance[]
+  responses      TaskResponse[]
+  notifications  Notification[]
+  triggeredWorkflows WorkflowInstance[] @relation("TriggeredBy")
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model Department {
+  id        String       @id @default(uuid())
+  name      String
+  parentId  String?
+  parent    Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id])
+  children  Department[] @relation("DepartmentHierarchy")
+  users     User[]
+  steps     Step[]       @relation("AssignedDepartment")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model WorkflowTemplate {
+  id          String         @id @default(uuid())
+  name        String
+  description String?
+  status      TemplateStatus @default(ACTIVE)
+  parameters  Json?          // Definition of triggering parameters
+  steps       Step[]
+  instances   WorkflowInstance[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model Step {
+  id                   String           @id @default(uuid())
+  workflowTemplate     WorkflowTemplate @relation(fields: [workflowTemplateId], references: [id])
+  workflowTemplateId   String
+  name                 String
+  order                Int
+  duration             Int              @default(1) // in days
+  isParallel           Boolean          @default(false)
+  assignedDepartment   Department?      @relation("AssignedDepartment", fields: [assignedDepartmentId], references: [id])
+  assignedDepartmentId String?
+  tasks                Task[]
+  dependsOn            Step[]           @relation("StepDependencies")
+  dependedOnBy         Step[]           @relation("StepDependencies")
+  positionX            Float?           @default(0)
+  positionY            Float?           @default(0)
+  stepInstances        StepInstance[]
+}
+
+model Task {
+  id            String         @id @default(uuid())
+  step          Step           @relation(fields: [stepId], references: [id])
+  stepId        String
+  label         String
+  order         Int
+  type          TaskType
+  isRequired    Boolean        @default(true)
+  fileTypes     String?        // comma separated: pdf,jpeg,png
+  responses     TaskResponse[]
+}
+
+model WorkflowInstance {
+  id            String           @id @default(uuid())
+  template      WorkflowTemplate @relation(fields: [templateId], references: [id])
+  templateId    String
+  triggeredBy   User             @relation("TriggeredBy", fields: [triggeredByUserId], references: [id])
+  triggeredByUserId String
+  parameters    Json?            // actual values like doctor_name, date etc.
+  status        InstanceStatus   @default(RUNNING)
+  stepInstances StepInstance[]
+  startedAt     DateTime         @default(now())
+  completedAt   DateTime?
+}
+
+model StepInstance {
+  id                 String           @id @default(uuid())
+  workflowInstance   WorkflowInstance @relation(fields: [workflowInstanceId], references: [id])
+  workflowInstanceId String
+  step               Step             @relation(fields: [stepId], references: [id])
+  stepId             String
+  status             StepStatus       @default(WAITING)
+  assignedUser       User?            @relation(fields: [assignedUserId], references: [id])
+  assignedUserId     String?
+  startedAt          DateTime?
+  dueAt              DateTime?
+  completedAt        DateTime?
+  isEscalated        Boolean          @default(false)
+  taskResponses      TaskResponse[]
+}
+
+model TaskResponse {
+  id             String       @id @default(uuid())
+  stepInstance   StepInstance @relation(fields: [stepInstanceId], references: [id])
+  stepInstanceId String
+  task           Task         @relation(fields: [taskId], references: [id])
+  taskId         String
+  responseValue  Json?        // checkbox: { value: true }, text: { value: "..." }, file: { path: "..." }
+  respondedBy    User         @relation(fields: [respondedByUserId], references: [id])
+  respondedByUserId String
+  respondedAt    DateTime     @default(now())
+}
+
+model Notification {
+  id                String           @id @default(uuid())
+  user              User             @relation(fields: [userId], references: [id])
+  userId            String
+  type              NotificationType @default(IN_APP)
+  title             String
+  message           String
+  isRead            Boolean          @default(false)
+  relatedInstanceId String?
+  createdAt         DateTime         @default(now())
+}
+
+model SystemConfig {
+  id           String  @id @default("default")
+  smtpHost     String?
+  smtpPort     Int?
+  smtpUser     String?
+  smtpPassword String?
+  smtpFromName String?
+  smtpFromEmail String?
+  adEnabled    Boolean @default(false)
+  adHost       String?
+  adBaseDN     String?
+}
